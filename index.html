@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mini Flappy</title>
+    <style>
+      :root {
+        font-family: 'Pretendard', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #121212;
+        color: #f5f5f5;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .game-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: min(480px, 90vw);
+      }
+
+      canvas {
+        background: #1e1e1e;
+        border: 2px solid #21c55d;
+        border-radius: 8px;
+      }
+
+      .panel {
+        display: flex;
+        justify-content: space-between;
+        font-size: 14px;
+        color: #c7c8ce;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="game-wrapper">
+      <canvas id="game-canvas" width="420" height="560"></canvas>
+      <div class="panel">
+        <span id="score">점수: 0</span>
+        <span id="high-score">최고 점수: 0</span>
+      </div>
+    </div>
+    <script>
+      // ====== 밸런스 세팅 ======
+      const SETTINGS = {
+        gravity: 0.48, // 중력 세기
+        jumpStrength: -5.6, // 점프 시 상승 속도
+        maxFallSpeed: 9, // 최대 낙하 속도 제한
+        obstacleSpeed: 2.6, // 장애물 이동 속도
+        obstacleWidth: 70, // 장애물 두께
+        obstacleGap: 160, // 상하 장애물 간격
+        spawnInterval: 1400, // 장애물 생성 주기(ms)
+        playerSize: 32, // 캐릭터 크기
+        safeTopBottomMargin: 12, // 화면 상단/하단 여유
+      };
+      // =========================
+
+      function createSprite(src) {
+        const image = new Image();
+        const sprite = { image, loaded: false, failed: false };
+        image.addEventListener('load', () => {
+          sprite.loaded = true;
+        });
+        image.addEventListener('error', () => {
+          sprite.failed = true;
+        });
+        image.src = src;
+        return sprite;
+      }
+
+      const SPRITES = {
+        player: createSprite('flappy-player.png'),
+        obstacle: createSprite('flappy-obstacle.png'),
+      };
+
+      const canvas = document.getElementById('game-canvas');
+      const ctx = canvas.getContext('2d');
+      const scoreEl = document.getElementById('score');
+      const highScoreEl = document.getElementById('high-score');
+
+      const state = {
+        playerY: canvas.height / 2,
+        velocity: 0,
+        obstacles: [],
+        playing: false,
+        lastSpawn: 0,
+        lastFrame: 0,
+        score: 0,
+        highScore: 0,
+        dead: false,
+      };
+
+      function resetGame() {
+        state.playerY = canvas.height / 2;
+        state.velocity = 0;
+        state.obstacles = [];
+        state.playing = false;
+        state.lastSpawn = 0;
+        state.score = 0;
+        state.dead = false;
+        updateScore();
+      }
+
+      function updateScore() {
+        scoreEl.textContent = `점수: ${state.score}`;
+        highScoreEl.textContent = `최고 점수: ${state.highScore}`;
+      }
+
+      function spawnObstacle() {
+        const minHeight = 40;
+        const maxHeight = canvas.height - SETTINGS.obstacleGap - SETTINGS.safeTopBottomMargin * 2;
+        const topHeight = Math.floor(Math.random() * (maxHeight - minHeight) + minHeight);
+        const bottomY = topHeight + SETTINGS.obstacleGap;
+        const bottomHeight = canvas.height - bottomY;
+
+        state.obstacles.push({
+          x: canvas.width,
+          width: SETTINGS.obstacleWidth,
+          topHeight,
+          bottomY,
+          bottomHeight,
+          passed: false,
+        });
+      }
+
+      function jump() {
+        if (state.dead) {
+          resetGame();
+        }
+        if (!state.playing) {
+          state.playing = true;
+          state.lastSpawn = performance.now();
+        }
+        state.velocity = SETTINGS.jumpStrength;
+      }
+
+      function applyPhysics(delta) {
+        state.velocity += SETTINGS.gravity * (delta / 16.67);
+        if (state.velocity > SETTINGS.maxFallSpeed) {
+          state.velocity = SETTINGS.maxFallSpeed;
+        }
+        state.playerY += state.velocity;
+      }
+
+      function moveObstacles(delta) {
+        const shift = SETTINGS.obstacleSpeed * (delta / 16.67);
+        state.obstacles.forEach((obs) => (obs.x -= shift));
+        state.obstacles = state.obstacles.filter((obs) => obs.x + obs.width > 0);
+      }
+
+      function checkCollisions() {
+        const playerX = 80;
+        const size = SETTINGS.playerSize;
+        const topY = state.playerY - size / 2;
+        const bottomY = state.playerY + size / 2;
+
+        // 바닥/천장 충돌
+        if (
+          topY < SETTINGS.safeTopBottomMargin ||
+          bottomY > canvas.height - SETTINGS.safeTopBottomMargin
+        ) {
+          gameOver();
+          return;
+        }
+
+        // 장애물 충돌 & 점수
+        state.obstacles.forEach((obs) => {
+          if (
+            playerX < obs.x + obs.width &&
+            playerX + size > obs.x &&
+            (topY < obs.topHeight || bottomY > obs.bottomY)
+          ) {
+            gameOver();
+          } else if (!obs.passed && obs.x + obs.width < playerX) {
+            obs.passed = true;
+            state.score += 1;
+            updateScore();
+          }
+        });
+      }
+
+      function gameOver() {
+        state.playing = false;
+        state.highScore = Math.max(state.highScore, state.score);
+        state.dead = true;
+        updateScore();
+      }
+
+      function drawPlayer() {
+        const size = SETTINGS.playerSize;
+        const sprite = SPRITES.player;
+        if (sprite.loaded) {
+          ctx.drawImage(sprite.image, 80, state.playerY - size / 2, size, size);
+        } else {
+          ctx.fillStyle = '#111';
+          ctx.fillRect(80, state.playerY - size / 2, size, size);
+        }
+      }
+
+      function drawObstacles() {
+        ctx.fillStyle = '#22c55e';
+        state.obstacles.forEach((obs) => {
+          drawObstacleSegment(obs.x, 0, obs.width, obs.topHeight);
+          drawObstacleSegment(obs.x, obs.bottomY, obs.width, obs.bottomHeight);
+        });
+      }
+
+      function drawObstacleSegment(x, y, width, height) {
+        const sprite = SPRITES.obstacle;
+        if (sprite.loaded) {
+          ctx.drawImage(sprite.image, x, y, width, height);
+        } else {
+          ctx.fillRect(x, y, width, height);
+        }
+      }
+
+      function drawOverlay() {
+        if (state.playing) return;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#f5f5f5';
+        ctx.font = '24px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('탭 혹은 스페이스로 시작!', canvas.width / 2, canvas.height / 2);
+        ctx.font = '14px system-ui';
+        ctx.fillText('장애물을 지나 점수를 얻으세요.', canvas.width / 2, canvas.height / 2 + 30);
+        if (state.score > 0) {
+          ctx.fillText(
+            `이번 점수: ${state.score} | 최고: ${state.highScore}`,
+            canvas.width / 2,
+            canvas.height / 2 + 60
+          );
+        }
+      }
+
+      function render(timestamp) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const delta = timestamp - state.lastFrame || 16;
+        state.lastFrame = timestamp;
+
+        if (state.playing) {
+          applyPhysics(delta);
+          moveObstacles(delta);
+          if (timestamp - state.lastSpawn > SETTINGS.spawnInterval) {
+            spawnObstacle();
+            state.lastSpawn = timestamp;
+          }
+          checkCollisions();
+        } else {
+          state.velocity = 0;
+        }
+
+        drawObstacles();
+        drawPlayer();
+        drawOverlay();
+
+        requestAnimationFrame(render);
+      }
+
+      function setupControls() {
+        window.addEventListener('keydown', (evt) => {
+          if (evt.code === 'Space' || evt.code === 'ArrowUp') {
+            evt.preventDefault();
+            jump();
+          } else if (evt.code === 'KeyR') {
+            resetGame();
+          }
+        });
+
+        canvas.addEventListener('pointerdown', jump);
+        canvas.addEventListener('pointerup', (evt) => evt.preventDefault());
+      }
+
+      setupControls();
+      resetGame();
+      requestAnimationFrame(render);
+    </script>
+  </body>
+</html>
