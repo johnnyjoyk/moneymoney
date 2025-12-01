@@ -60,6 +60,87 @@
         color: #cbd5f5;
         line-height: 1.6;
       }
+
+      .leaderboard {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 10px;
+        padding: 12px 16px;
+        color: #e2e8f0;
+      }
+
+      .leaderboard h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        color: #94a3b8;
+      }
+
+      .leaderboard ol {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
+      }
+
+      .leaderboard li {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px dashed rgba(148, 163, 184, 0.2);
+        padding-bottom: 4px;
+      }
+
+      .leaderboard li span:first-child {
+        width: 18px;
+        color: #94a3b8;
+      }
+
+      .name-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+
+      .name-modal.hidden {
+        display: none;
+      }
+
+      .name-modal form {
+        background: #0f172a;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 12px;
+        padding: 24px;
+        width: min(320px, 90vw);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        color: #e2e8f0;
+      }
+
+      .name-modal input {
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        border-radius: 8px;
+        padding: 10px;
+        background: rgba(15, 23, 42, 0.7);
+        color: #fff;
+      }
+
+      .name-modal button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px;
+        background: linear-gradient(90deg, #22d3ee, #3b82f6);
+        color: #020617;
+        font-weight: 600;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -84,10 +165,24 @@
         </div>
       </div>
       <div class="instructions">
-        스페이스로 색상을 <em>노랑 → 파랑 → 빨강</em> 순으로 변경하세요. <br />
-        노랑은 파랑에 승, 파랑은 빨강에 승, 빨강은 노랑에 승! 녹색 핀은 HP를 회복해요.<br />
+        스페이스로 파랑 ↔ 빨강을 순환하거나 <strong>A=파랑</strong>, <strong>S=빨강</strong>으로 즉시 전환하세요. <br />
+        같은 색이면 체력이 줄지 않고, 다른 색이면 HP가 10 깎입니다. 녹색 빈 사각형은 HP +10!<br />
         R 키로 게임을 다시 시작할 수 있습니다.
       </div>
+      <div class="leaderboard">
+        <h3>오늘의 순위</h3>
+        <ol id="scoreboard">
+          <li>기록 없음</li>
+        </ol>
+      </div>
+    </div>
+    <div class="name-modal" id="name-modal">
+      <form id="name-form">
+        <h2>플레이어 이름</h2>
+        <p>오늘 얻은 기록이 순위판에 저장됩니다.</p>
+        <input id="player-name-input" type="text" maxlength="12" placeholder="이름 입력" required />
+        <button type="submit">시작하기</button>
+      </form>
     </div>
 
     <script>
@@ -157,6 +252,14 @@
       const distanceEl = document.getElementById('distance-readout');
       const colorEl = document.getElementById('color-readout');
       const speedEl = document.getElementById('speed-readout');
+      const scoreboardEl = document.getElementById('scoreboard');
+      const nameModal = document.getElementById('name-modal');
+      const nameForm = document.getElementById('name-form');
+      const nameInput = document.getElementById('player-name-input');
+
+      const SCOREBOARD_LIMIT = 10;
+      const SCOREBOARD_KEY_PREFIX = 'plinko-scoreboard-';
+      let scoreboardCache = [];
 
       const state = {
         ball: {
@@ -176,14 +279,92 @@
         nextRowY: SETTINGS.firstRowOffset,
         feedbackTimer: 0,
         lastOutcome: null,
+        playerName: '',
+        awaitingName: true,
       };
 
       function init() {
         canvas.width = SETTINGS.canvasWidth;
         canvas.height = SETTINGS.canvasHeight;
+        loadScoreboard();
+        updateScoreboardDisplay();
+        showNameModal(true);
         resetGame();
         state.lastTime = performance.now();
         requestAnimationFrame(loop);
+        setupNameForm();
+      }
+
+      function getScoreboardKey() {
+        return `${SCOREBOARD_KEY_PREFIX}${new Date().toISOString().slice(0, 10)}`;
+      }
+
+      function loadScoreboard() {
+        try {
+          const data = localStorage.getItem(getScoreboardKey());
+          scoreboardCache = data ? JSON.parse(data) : [];
+        } catch {
+          scoreboardCache = [];
+        }
+      }
+
+      function saveScoreboard() {
+        try {
+          localStorage.setItem(getScoreboardKey(), JSON.stringify(scoreboardCache));
+        } catch {
+          /* ignore */
+        }
+      }
+
+      function updateScoreboardDisplay() {
+        if (!scoreboardEl) return;
+        if (!scoreboardCache.length) {
+          scoreboardEl.innerHTML = '<li>기록 없음</li>';
+          return;
+        }
+        scoreboardEl.innerHTML = scoreboardCache
+          .map(
+            (entry, idx) =>
+              `<li><span>${idx + 1}.</span><span>${entry.name}</span><span>${entry.distance} m</span></li>`
+          )
+          .join('');
+      }
+
+      function recordScore(distance) {
+        if (!state.playerName) return;
+        scoreboardCache.push({ name: state.playerName, distance, timestamp: Date.now() });
+        scoreboardCache.sort(
+          (a, b) => b.distance - a.distance || a.timestamp - b.timestamp
+        );
+        if (scoreboardCache.length > SCOREBOARD_LIMIT) {
+          scoreboardCache.length = SCOREBOARD_LIMIT;
+        }
+        saveScoreboard();
+        updateScoreboardDisplay();
+      }
+
+      function setupNameForm() {
+        if (!nameForm) return;
+        nameForm.addEventListener('submit', (evt) => {
+          evt.preventDefault();
+          const value = nameInput.value.trim() || '플레이어';
+          state.playerName = value;
+          state.awaitingName = false;
+          showNameModal(false);
+          resetGame();
+        });
+      }
+
+      function showNameModal(show) {
+        if (!nameModal) return;
+        if (show) {
+          nameModal.classList.remove('hidden');
+          if (nameInput) {
+            setTimeout(() => nameInput.focus(), 50);
+          }
+        } else {
+          nameModal.classList.add('hidden');
+        }
       }
 
       function buildInitialPins() {
@@ -231,7 +412,8 @@
         state.ball.y = 40;
         state.ball.vx = 0;
         state.ball.vy = 0.25;
-        state.playing = true;
+        state.awaitingName = !state.playerName;
+        state.playing = !state.awaitingName;
         state.colorIndex = 0;
         state.lastPinCollided = null;
         buildInitialPins();
@@ -269,8 +451,9 @@
         updateFeedback(delta);
         updateHud();
 
-        if (state.hp <= 0) {
+        if (state.hp <= 0 && state.playing) {
           state.playing = false;
+          recordScore(Math.floor(state.distance / 10));
         }
       }
 
