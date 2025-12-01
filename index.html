@@ -2,12 +2,12 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <title>Mini Flappy</title>
+    <title>Plinko Clash</title>
     <style>
       :root {
-        font-family: 'Pretendard', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background: #121212;
-        color: #f5f5f5;
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #0f172a;
+        color: #f8fafc;
       }
 
       body {
@@ -16,272 +16,607 @@
         display: flex;
         justify-content: center;
         align-items: center;
+        background: radial-gradient(circle at top, rgba(96, 165, 250, 0.15), transparent 70%);
       }
 
       .game-wrapper {
+        width: min(520px, 90vw);
         display: flex;
         flex-direction: column;
         gap: 12px;
-        width: min(480px, 90vw);
       }
 
       canvas {
-        background: #1e1e1e;
-        border: 2px solid #21c55d;
-        border-radius: 8px;
+        background: #020617;
+        border: 2px solid #22d3ee;
+        border-radius: 12px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
       }
 
       .panel {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
         font-size: 14px;
-        color: #c7c8ce;
+      }
+
+      .chip {
+        padding: 8px 12px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+      }
+
+      .chip strong {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      .instructions {
+        font-size: 13px;
+        color: #cbd5f5;
+        line-height: 1.6;
       }
     </style>
   </head>
   <body>
     <div class="game-wrapper">
-      <canvas id="game-canvas" width="420" height="560"></canvas>
+      <canvas id="game" width="420" height="560"></canvas>
       <div class="panel">
-        <span id="score">점수: 0</span>
-        <span id="high-score">최고 점수: 0</span>
+        <div class="chip">
+          <strong>HP</strong>
+          <span id="hp-readout">100</span>
+        </div>
+        <div class="chip">
+          <strong>거리</strong>
+          <span id="distance-readout">0 m</span>
+        </div>
+        <div class="chip">
+          <strong>현재 색상</strong>
+          <span id="color-readout">노랑</span>
+        </div>
+        <div class="chip">
+          <strong>속도</strong>
+          <span id="speed-readout">0.0</span>
+        </div>
+      </div>
+      <div class="instructions">
+        스페이스로 색상을 <em>노랑 → 파랑 → 빨강</em> 순으로 변경하세요. <br />
+        노랑은 파랑에 승, 파랑은 빨강에 승, 빨강은 노랑에 승! 녹색 핀은 HP를 회복해요.<br />
+        R 키로 게임을 다시 시작할 수 있습니다.
       </div>
     </div>
+
     <script>
       // ====== 밸런스 세팅 ======
       const SETTINGS = {
-        gravity: 0.48, // 중력 세기
-        jumpStrength: -5.6, // 점프 시 상승 속도
-        maxFallSpeed: 9, // 최대 낙하 속도 제한
-        obstacleSpeed: 2.6, // 장애물 이동 속도
-        obstacleWidth: 70, // 장애물 두께
-        obstacleGap: 160, // 상하 장애물 간격
-        spawnInterval: 1400, // 장애물 생성 주기(ms)
-        playerSize: 32, // 캐릭터 크기
-        safeTopBottomMargin: 12, // 화면 상단/하단 여유
+        canvasWidth: 420,
+        canvasHeight: 560,
+        maxHP: 100,
+        initialRows: 22,
+        rowSpacing: 72,
+        firstRowOffset: 135,
+        pinRadius: 16,
+        pinColumnsPattern: [4, 3],
+        pinColumnPadding: 30,
+        pinGreenChance: 0.05,
+        ballRadius: 18,
+        baseGravity: 0.095,
+        gravityGrowth: 0.000025,
+        maxGravity: 0.55,
+        horizontalDamp: 0.992,
+        wallBounceFactor: -0.6,
+        bounceStrength: {
+          win: -4.8,
+          draw: -6.0,
+          lose: -3.2,
+          heal: -5.2,
+        },
+        horizontalImpulse: {
+          win: 1.05,
+          draw: 1.6,
+          lose: 0.95,
+          heal: 1.2,
+        },
+        ascendGravityMultiplier: 1.3,
+        descendGravityMultiplier: 1.5,
+        hoverThreshold: 0.35,
+        hoverDamp: 0.8,
+        loseDamage: 10,
+        drawDamage: 1,
+        healAmount: 10,
+        gravityDelta: 16.67,
+        minDropSpeed: 0.5,
+        pinCullMargin: 4,
       };
       // =========================
+
+      const PLAYER_COLORS = [
+        { name: 'yellow', label: '노랑', hex: '#facc15' },
+        { name: 'blue', label: '파랑', hex: '#60a5fa' },
+        { name: 'red', label: '빨강', hex: '#f87171' },
+      ];
+
+      const COLOR_RULES = {
+        yellow: { beats: 'blue', loses: 'red' },
+        blue: { beats: 'red', loses: 'yellow' },
+        red: { beats: 'yellow', loses: 'blue' },
+      };
+
+      const PIN_COLORS = {
+        yellow: '#facc15',
+        blue: '#60a5fa',
+        red: '#f87171',
+        green: '#4ade80',
+      };
 
       function createSprite(src) {
         const image = new Image();
         const sprite = { image, loaded: false, failed: false };
-        image.addEventListener('load', () => {
-          sprite.loaded = true;
-        });
-        image.addEventListener('error', () => {
-          sprite.failed = true;
-        });
+        image.addEventListener('load', () => (sprite.loaded = true));
+        image.addEventListener('error', () => (sprite.failed = true));
         image.src = src;
         return sprite;
       }
 
       const SPRITES = {
-        player: createSprite('flappy-player.png'),
-        obstacle: createSprite('flappy-obstacle.png'),
+        yellow: createSprite('rps-yellow.png'),
+        blue: createSprite('rps-blue.png'),
+        red: createSprite('rps-red.png'),
+        green: createSprite('rps-green.png'),
       };
 
-      const canvas = document.getElementById('game-canvas');
+      const canvas = document.getElementById('game');
       const ctx = canvas.getContext('2d');
-      const scoreEl = document.getElementById('score');
-      const highScoreEl = document.getElementById('high-score');
+      const hpEl = document.getElementById('hp-readout');
+      const distanceEl = document.getElementById('distance-readout');
+      const colorEl = document.getElementById('color-readout');
+      const speedEl = document.getElementById('speed-readout');
 
       const state = {
-        playerY: canvas.height / 2,
-        velocity: 0,
-        obstacles: [],
-        playing: false,
-        lastSpawn: 0,
-        lastFrame: 0,
-        score: 0,
-        highScore: 0,
-        dead: false,
+        ball: {
+          x: SETTINGS.canvasWidth / 2,
+          y: 40,
+          vx: 0,
+          vy: 0.25,
+        },
+        hp: SETTINGS.maxHP,
+        colorIndex: 0,
+        pins: [],
+        playing: true,
+        lastTime: 0,
+        distance: 0,
+        lastPinCollided: null,
+        rowPatternIndex: 0,
+        nextRowY: SETTINGS.firstRowOffset,
+        feedbackTimer: 0,
+        lastOutcome: null,
       };
 
+      function init() {
+        canvas.width = SETTINGS.canvasWidth;
+        canvas.height = SETTINGS.canvasHeight;
+        resetGame();
+        state.lastTime = performance.now();
+        requestAnimationFrame(loop);
+      }
+
+      function buildInitialPins() {
+        state.pins = [];
+        state.rowPatternIndex = 0;
+        state.nextRowY = SETTINGS.firstRowOffset;
+        while (state.nextRowY < SETTINGS.canvasHeight + 80) {
+          addPinRow();
+        }
+      }
+
+      function addPinRow() {
+        const pattern = SETTINGS.pinColumnsPattern;
+        const cols = pattern[state.rowPatternIndex % pattern.length];
+        const maxCols = Math.max(...pattern);
+        const spacing =
+          maxCols > 1
+            ? (SETTINGS.canvasWidth - SETTINGS.pinColumnPadding * 2) / (maxCols - 1)
+            : 0;
+        const startX =
+          SETTINGS.pinColumnPadding + (state.rowPatternIndex % 2 === 0 ? 0 : spacing / 2);
+        for (let col = 0; col < cols; col += 1) {
+          const x = startX + spacing * col;
+          state.pins.push({
+            id: `${state.rowPatternIndex}-${col}`,
+            x,
+            y: state.nextRowY,
+            color: pickPinColor(),
+          });
+        }
+        state.rowPatternIndex += 1;
+        state.nextRowY += SETTINGS.rowSpacing;
+      }
+
+      function pickPinColor() {
+        if (Math.random() < SETTINGS.pinGreenChance) return 'green';
+        const keys = ['yellow', 'blue', 'red'];
+        return keys[Math.floor(Math.random() * keys.length)];
+      }
+
       function resetGame() {
-        state.playerY = canvas.height / 2;
-        state.velocity = 0;
-        state.obstacles = [];
-        state.playing = false;
-        state.lastSpawn = 0;
-        state.score = 0;
-        state.dead = false;
-        updateScore();
+        state.hp = SETTINGS.maxHP;
+        state.distance = 0;
+        state.ball.x = SETTINGS.canvasWidth / 2;
+        state.ball.y = 40;
+        state.ball.vx = 0;
+        state.ball.vy = 0.25;
+        state.playing = true;
+        state.colorIndex = 0;
+        state.lastPinCollided = null;
+        buildInitialPins();
+        updateHud();
+        state.lastTime = performance.now();
+        state.feedbackTimer = 0;
+        state.lastOutcome = null;
       }
 
-      function updateScore() {
-        scoreEl.textContent = `점수: ${state.score}`;
-        highScoreEl.textContent = `최고 점수: ${state.highScore}`;
+      function updateHud() {
+        hpEl.textContent = `${Math.max(0, Math.floor(state.hp))}`;
+        distanceEl.textContent = `${Math.floor(state.distance / 10)} m`;
+        colorEl.textContent = PLAYER_COLORS[state.colorIndex].label;
+        speedEl.textContent = Math.max(0, state.ball.vy).toFixed(2);
       }
 
-      function spawnObstacle() {
-        const minHeight = 40;
-        const maxHeight = canvas.height - SETTINGS.obstacleGap - SETTINGS.safeTopBottomMargin * 2;
-        const topHeight = Math.floor(Math.random() * (maxHeight - minHeight) + minHeight);
-        const bottomY = topHeight + SETTINGS.obstacleGap;
-        const bottomHeight = canvas.height - bottomY;
+      function loop(timestamp) {
+        const delta = timestamp - state.lastTime || SETTINGS.gravityDelta;
+        state.lastTime = timestamp;
 
-        state.obstacles.push({
-          x: canvas.width,
-          width: SETTINGS.obstacleWidth,
-          topHeight,
-          bottomY,
-          bottomHeight,
-          passed: false,
-        });
-      }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      function jump() {
-        if (state.dead) {
-          resetGame();
+        if (state.playing) {
+          update(delta);
         }
-        if (!state.playing) {
-          state.playing = true;
-          state.lastSpawn = performance.now();
-        }
-        state.velocity = SETTINGS.jumpStrength;
+
+        draw();
+        requestAnimationFrame(loop);
       }
 
-      function applyPhysics(delta) {
-        state.velocity += SETTINGS.gravity * (delta / 16.67);
-        if (state.velocity > SETTINGS.maxFallSpeed) {
-          state.velocity = SETTINGS.maxFallSpeed;
+      function update(delta) {
+        applyGravity(delta);
+        moveBall(delta);
+        checkCollisions();
+        updateFeedback(delta);
+        updateHud();
+
+        if (state.hp <= 0) {
+          state.playing = false;
         }
-        state.playerY += state.velocity;
       }
 
-      function moveObstacles(delta) {
-        const shift = SETTINGS.obstacleSpeed * (delta / 16.67);
-        state.obstacles.forEach((obs) => (obs.x -= shift));
-        state.obstacles = state.obstacles.filter((obs) => obs.x + obs.width > 0);
+      function applyGravity(delta) {
+        const baseGravity =
+          Math.min(
+            SETTINGS.maxGravity,
+            SETTINGS.baseGravity + state.distance * SETTINGS.gravityGrowth
+          ) * (delta / SETTINGS.gravityDelta);
+        const multiplier =
+          state.ball.vy < 0 ? SETTINGS.ascendGravityMultiplier : SETTINGS.descendGravityMultiplier;
+        state.ball.vy += baseGravity * multiplier;
+
+        if (Math.abs(state.ball.vy) < SETTINGS.hoverThreshold) {
+          state.ball.vy *= SETTINGS.hoverDamp;
+        }
+      }
+
+      function moveBall(delta) {
+        const deltaFactor = delta / SETTINGS.gravityDelta;
+        const vy = state.ball.vy >= 0
+          ? Math.max(SETTINGS.minDropSpeed, state.ball.vy)
+          : state.ball.vy;
+        const step = vy * deltaFactor;
+        state.ball.x += state.ball.vx * deltaFactor;
+        state.ball.y += step;
+        if (step > 0) {
+          state.distance += step;
+        }
+        state.ball.vx *= SETTINGS.horizontalDamp;
+
+        // 벽 충돌
+        const leftBound = SETTINGS.ballRadius;
+        const rightBound = SETTINGS.canvasWidth - SETTINGS.ballRadius;
+        if (state.ball.x < leftBound) {
+          state.ball.x = leftBound;
+          state.ball.vx *= SETTINGS.wallBounceFactor;
+        } else if (state.ball.x > rightBound) {
+          state.ball.x = rightBound;
+          state.ball.vx *= SETTINGS.wallBounceFactor;
+        }
+        handleCamera();
+      }
+
+      function handleCamera() {
+        const threshold = SETTINGS.canvasHeight * 0.65;
+        if (state.ball.y > threshold) {
+          const shift = state.ball.y - threshold;
+          state.ball.y -= shift;
+          state.pins.forEach((pin) => {
+            pin.y -= shift;
+          });
+          state.nextRowY -= shift;
+        }
+
+        state.pins = state.pins.filter((pin) => pin.y > -80);
+        while (getMaxPinY() < SETTINGS.canvasHeight + 80) {
+          addPinRow();
+        }
+      }
+
+      function getMaxPinY() {
+        if (state.pins.length === 0) return -Infinity;
+        return state.pins.reduce((max, pin) => Math.max(max, pin.y), -Infinity);
       }
 
       function checkCollisions() {
-        const playerX = 80;
-        const size = SETTINGS.playerSize;
-        const topY = state.playerY - size / 2;
-        const bottomY = state.playerY + size / 2;
+        const radiusSum = SETTINGS.ballRadius + SETTINGS.pinRadius;
+        let released = true;
+        for (const pin of state.pins) {
+          const dx = state.ball.x - pin.x;
+          const dy = state.ball.y - pin.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= radiusSum) {
+            if (state.lastPinCollided !== pin.id) {
+              resolveCollision(pin, dx, dy);
+              state.lastPinCollided = pin.id;
+            }
+            released = false;
+            break;
+          }
+        }
 
-        // 바닥/천장 충돌
-        if (
-          topY < SETTINGS.safeTopBottomMargin ||
-          bottomY > canvas.height - SETTINGS.safeTopBottomMargin
-        ) {
-          gameOver();
+        if (released) {
+          state.lastPinCollided = null;
+        }
+      }
+
+      function resolveCollision(pin, dx, dy) {
+        const playerColor = PLAYER_COLORS[state.colorIndex].name;
+        let outcome = 'draw';
+        if (pin.color === 'green') {
+          outcome = 'heal';
+        } else if (pin.color === playerColor) {
+          outcome = 'draw';
+        } else if (COLOR_RULES[playerColor].beats === pin.color) {
+          outcome = 'win';
+        } else {
+          outcome = 'lose';
+        }
+
+        if (outcome === 'win' || outcome === 'lose') {
+          state.lastOutcome = outcome;
+          state.feedbackTimer = 900;
+        }
+
+        switch (outcome) {
+          case 'lose':
+            state.hp -= SETTINGS.loseDamage;
+            break;
+          case 'draw':
+            state.hp -= SETTINGS.drawDamage;
+            break;
+          case 'heal':
+            state.hp = Math.min(SETTINGS.maxHP, state.hp + SETTINGS.healAmount);
+            break;
+        }
+
+        state.hp = Math.max(0, state.hp);
+        applyBounce(outcome, dx, dy);
+        cullPinsAbove(pin.y);
+      }
+
+      function updateFeedback(delta) {
+        if (state.feedbackTimer > 0) {
+          state.feedbackTimer = Math.max(0, state.feedbackTimer - delta);
+          if (state.feedbackTimer === 0) {
+            state.lastOutcome = null;
+          }
+        }
+      }
+
+      function applyBounce(outcome, dx, dy) {
+        const direction = Math.sign(dx) || (Math.random() < 0.5 ? -1 : 1);
+        state.ball.vx += direction * SETTINGS.horizontalImpulse[outcome];
+        state.ball.vy = SETTINGS.bounceStrength[outcome];
+      }
+
+      function cullPinsAbove(y) {
+        const margin = SETTINGS.pinCullMargin;
+        state.pins = state.pins.filter((pin) => pin.y > y + margin);
+      }
+
+      function draw() {
+        drawPins();
+        drawBall();
+        drawSpeechBubble();
+        drawOverlay();
+      }
+
+      function drawPins() {
+        for (const pin of state.pins) {
+          drawColorToken(pin.color, pin.x, pin.y, SETTINGS.pinRadius);
+        }
+      }
+
+      function drawBall() {
+        const color = PLAYER_COLORS[state.colorIndex];
+        drawColorToken(color.name, state.ball.x, state.ball.y, SETTINGS.ballRadius);
+      }
+
+      function drawColorToken(type, x, y, radius) {
+        const sprite = SPRITES[type];
+        if (sprite && sprite.loaded) {
+          ctx.drawImage(sprite.image, x - radius, y - radius, radius * 2, radius * 2);
           return;
         }
 
-        // 장애물 충돌 & 점수
-        state.obstacles.forEach((obs) => {
-          if (
-            playerX < obs.x + obs.width &&
-            playerX + size > obs.x &&
-            (topY < obs.topHeight || bottomY > obs.bottomY)
-          ) {
-            gameOver();
-          } else if (!obs.passed && obs.x + obs.width < playerX) {
-            obs.passed = true;
-            state.score += 1;
-            updateScore();
-          }
-        });
-      }
+        ctx.beginPath();
+        ctx.fillStyle = PIN_COLORS[type] || '#f8fafc';
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-      function gameOver() {
-        state.playing = false;
-        state.highScore = Math.max(state.highScore, state.score);
-        state.dead = true;
-        updateScore();
-      }
-
-      function drawPlayer() {
-        const size = SETTINGS.playerSize;
-        const sprite = SPRITES.player;
-        if (sprite.loaded) {
-          ctx.drawImage(sprite.image, 80, state.playerY - size / 2, size, size);
+        if (type === 'green') {
+          drawHealIcon(x, y, radius * 0.75);
         } else {
-          ctx.fillStyle = '#111';
-          ctx.fillRect(80, state.playerY - size / 2, size, size);
+          drawIcon(type, x, y, radius * 0.75);
         }
       }
 
-      function drawObstacles() {
-        ctx.fillStyle = '#22c55e';
-        state.obstacles.forEach((obs) => {
-          drawObstacleSegment(obs.x, 0, obs.width, obs.topHeight);
-          drawObstacleSegment(obs.x, obs.bottomY, obs.width, obs.bottomHeight);
-        });
+      function drawIcon(type, cx, cy, size) {
+        if (type === 'green') {
+          drawHealIcon(cx, cy, size);
+          return;
+        }
+        ctx.save();
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#0f172a';
+        ctx.fillStyle = '#0f172a';
+
+        if (type === 'yellow') {
+          // 가위
+          ctx.beginPath();
+          ctx.moveTo(cx - size * 0.6, cy - size * 0.4);
+          ctx.lineTo(cx + size * 0.6, cy + size * 0.4);
+          ctx.moveTo(cx - size * 0.6, cy + size * 0.4);
+          ctx.lineTo(cx + size * 0.6, cy - size * 0.4);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx - size * 0.2, cy + size * 0.3, size * 0.2, 0, Math.PI * 2);
+          ctx.arc(cx + size * 0.2, cy - size * 0.3, size * 0.2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (type === 'blue') {
+          // 펼친 손
+          ctx.beginPath();
+          ctx.moveTo(cx - size * 0.5, cy + size * 0.4);
+          ctx.lineTo(cx - size * 0.2, cy - size * 0.4);
+          ctx.lineTo(cx, cy + size * 0.2);
+          ctx.lineTo(cx + size * 0.2, cy - size * 0.6);
+          ctx.lineTo(cx + size * 0.4, cy + size * 0.2);
+          ctx.lineTo(cx + size * 0.5, cy - size * 0.2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(cx - size * 0.5, cy + size * 0.4);
+          ctx.quadraticCurveTo(cx - size * 0.2, cy + size * 0.6, cx + size * 0.3, cy + size * 0.6);
+          ctx.stroke();
+        } else if (type === 'red') {
+          // 주먹
+          ctx.beginPath();
+          ctx.arc(cx, cy, size * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
 
-      function drawObstacleSegment(x, y, width, height) {
-        const sprite = SPRITES.obstacle;
-        if (sprite.loaded) {
-          ctx.drawImage(sprite.image, x, y, width, height);
-        } else {
-          ctx.fillRect(x, y, width, height);
-        }
+      function drawHealIcon(cx, cy, size) {
+        ctx.save();
+        ctx.fillStyle = '#065f46';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - size * 0.6);
+        ctx.arc(cx - size * 0.3, cy - size * 0.2, size * 0.3, Math.PI * 1.2, Math.PI * 2);
+        ctx.arc(cx + size * 0.3, cy - size * 0.2, size * 0.3, Math.PI, Math.PI * 1.8);
+        ctx.lineTo(cx, cy + size * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#4ade80';
+        ctx.beginPath();
+        ctx.rect(cx - size * 0.15, cy - size * 0.5, size * 0.3, size);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.rect(cx - size * 0.5, cy - size * 0.15, size, size * 0.3);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function drawSpeechBubble() {
+        if (!state.lastOutcome || state.lastOutcome === 'heal') return;
+        const isWin = state.lastOutcome === 'win';
+        const text = isWin ? 'NICE!' : 'SO SAD...';
+        const bubbleWidth = 90;
+        const bubbleHeight = 30;
+        const x = Math.min(
+          Math.max(state.ball.x - bubbleWidth / 2, 20),
+          SETTINGS.canvasWidth - bubbleWidth - 20
+        );
+        const y = Math.max(state.ball.y - SETTINGS.ballRadius - 40, 20);
+
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, state.feedbackTimer / 900 + 0.2);
+        ctx.fillStyle = isWin ? 'rgba(34,197,94,0.9)' : 'rgba(248,113,113,0.9)';
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, bubbleWidth, bubbleHeight, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 14px Pretendard, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x + bubbleWidth / 2, y + bubbleHeight / 2);
+        ctx.restore();
       }
 
       function drawOverlay() {
         if (state.playing) return;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#f5f5f5';
-        ctx.font = '24px system-ui';
+        ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'center';
-        ctx.fillText('탭 혹은 스페이스로 시작!', canvas.width / 2, canvas.height / 2);
-        ctx.font = '14px system-ui';
-        ctx.fillText('장애물을 지나 점수를 얻으세요.', canvas.width / 2, canvas.height / 2 + 30);
-        if (state.score > 0) {
-          ctx.fillText(
-            `이번 점수: ${state.score} | 최고: ${state.highScore}`,
-            canvas.width / 2,
-            canvas.height / 2 + 60
-          );
+        ctx.font = '28px Pretendard, sans-serif';
+        ctx.fillText('게임 오버', canvas.width / 2, canvas.height / 2 - 10);
+        ctx.font = '16px Pretendard, sans-serif';
+        ctx.fillText(
+          `기록: ${Math.floor(state.distance / 10)} m`,
+          canvas.width / 2,
+          canvas.height / 2 + 20
+        );
+        ctx.fillText('R 키로 다시 시작하세요', canvas.width / 2, canvas.height / 2 + 44);
+      }
+
+      function cycleColor() {
+        state.colorIndex = (state.colorIndex + 1) % PLAYER_COLORS.length;
+        updateHud();
+      }
+
+      function setColorByName(name) {
+        const index = PLAYER_COLORS.findIndex((c) => c.name === name);
+        if (index !== -1) {
+          state.colorIndex = index;
+          updateHud();
         }
       }
 
-      function render(timestamp) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const delta = timestamp - state.lastFrame || 16;
-        state.lastFrame = timestamp;
-
-        if (state.playing) {
-          applyPhysics(delta);
-          moveObstacles(delta);
-          if (timestamp - state.lastSpawn > SETTINGS.spawnInterval) {
-            spawnObstacle();
-            state.lastSpawn = timestamp;
-          }
-          checkCollisions();
-        } else {
-          state.velocity = 0;
+      window.addEventListener('keydown', (evt) => {
+        if (evt.code === 'Space') {
+          evt.preventDefault();
+          cycleColor();
+        } else if (evt.code === 'KeyA') {
+          evt.preventDefault();
+          setColorByName('yellow');
+        } else if (evt.code === 'KeyS') {
+          evt.preventDefault();
+          setColorByName('red');
+        } else if (evt.code === 'KeyD') {
+          evt.preventDefault();
+          setColorByName('blue');
+        } else if (evt.code === 'KeyR') {
+          resetGame();
         }
+      });
 
-        drawObstacles();
-        drawPlayer();
-        drawOverlay();
-
-        requestAnimationFrame(render);
-      }
-
-      function setupControls() {
-        window.addEventListener('keydown', (evt) => {
-          if (evt.code === 'Space' || evt.code === 'ArrowUp') {
-            evt.preventDefault();
-            jump();
-          } else if (evt.code === 'KeyR') {
-            resetGame();
-          }
-        });
-
-        canvas.addEventListener('pointerdown', jump);
-        canvas.addEventListener('pointerup', (evt) => evt.preventDefault());
-      }
-
-      setupControls();
-      resetGame();
-      requestAnimationFrame(render);
+      init();
     </script>
   </body>
 </html>
