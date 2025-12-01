@@ -95,7 +95,7 @@
       const SETTINGS = {
         canvasWidth: 420,
         canvasHeight: 560,
-        maxHP: 100,
+        maxHP: 50,
         initialRows: 22,
         rowSpacing: 72,
         firstRowOffset: 135,
@@ -126,7 +126,7 @@
         hoverThreshold: 0.35,
         hoverDamp: 0.8,
         loseDamage: 10,
-        drawDamage: 1,
+        drawDamage: 0,
         healAmount: 10,
         gravityDelta: 16.67,
         minDropSpeed: 0.5,
@@ -135,19 +135,16 @@
       // =========================
 
       const PLAYER_COLORS = [
-        { name: 'yellow', label: '노랑', hex: '#facc15' },
         { name: 'blue', label: '파랑', hex: '#60a5fa' },
         { name: 'red', label: '빨강', hex: '#f87171' },
       ];
 
       const COLOR_RULES = {
-        yellow: { beats: 'blue', loses: 'red' },
-        blue: { beats: 'red', loses: 'yellow' },
-        red: { beats: 'yellow', loses: 'blue' },
+        blue: { beats: 'red', loses: null },
+        red: { beats: 'blue', loses: null },
       };
 
       const PIN_COLORS = {
-        yellow: '#facc15',
         blue: '#60a5fa',
         red: '#f87171',
         green: '#4ade80',
@@ -163,7 +160,6 @@
       }
 
       const SPRITES = {
-        yellow: createSprite('rps-yellow.png'),
         blue: createSprite('rps-blue.png'),
         red: createSprite('rps-red.png'),
         green: createSprite('rps-green.png'),
@@ -238,7 +234,7 @@
 
       function pickPinColor() {
         if (Math.random() < SETTINGS.pinGreenChance) return 'green';
-        const keys = ['yellow', 'blue', 'red'];
+        const keys = ['blue', 'red'];
         return keys[Math.floor(Math.random() * keys.length)];
       }
 
@@ -384,8 +380,6 @@
           outcome = 'heal';
         } else if (pin.color === playerColor) {
           outcome = 'draw';
-        } else if (COLOR_RULES[playerColor].beats === pin.color) {
-          outcome = 'win';
         } else {
           outcome = 'lose';
         }
@@ -400,7 +394,7 @@
             state.hp -= SETTINGS.loseDamage;
             break;
           case 'draw':
-            state.hp -= SETTINGS.drawDamage;
+            // no HP change on same color
             break;
           case 'heal':
             state.hp = Math.min(SETTINGS.maxHP, state.hp + SETTINGS.healAmount);
@@ -484,19 +478,7 @@
         ctx.strokeStyle = '#0f172a';
         ctx.fillStyle = '#0f172a';
 
-        if (type === 'yellow') {
-          // 가위
-          ctx.beginPath();
-          ctx.moveTo(cx - size * 0.6, cy - size * 0.4);
-          ctx.lineTo(cx + size * 0.6, cy + size * 0.4);
-          ctx.moveTo(cx - size * 0.6, cy + size * 0.4);
-          ctx.lineTo(cx + size * 0.6, cy - size * 0.4);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(cx - size * 0.2, cy + size * 0.3, size * 0.2, 0, Math.PI * 2);
-          ctx.arc(cx + size * 0.2, cy - size * 0.3, size * 0.2, 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (type === 'blue') {
+        if (type === 'blue') {
           // 펼친 손
           ctx.beginPath();
           ctx.moveTo(cx - size * 0.5, cy + size * 0.4);
@@ -604,13 +586,10 @@
           cycleColor();
         } else if (evt.code === 'KeyA') {
           evt.preventDefault();
-          setColorByName('yellow');
+          setColorByName('blue');
         } else if (evt.code === 'KeyS') {
           evt.preventDefault();
           setColorByName('red');
-        } else if (evt.code === 'KeyD') {
-          evt.preventDefault();
-          setColorByName('blue');
         } else if (evt.code === 'KeyR') {
           resetGame();
         }
