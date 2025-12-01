@@ -147,7 +147,7 @@
       const PIN_COLORS = {
         blue: '#60a5fa',
         red: '#f87171',
-        green: '#4ade80',
+        green: '#0f172a',
       };
 
 
@@ -440,7 +440,7 @@
         ctx.stroke();
 
         if (type === 'green') {
-          drawHealIcon(x, y, radius * 0.75);
+          drawHealIcon(x, y, radius * 0.9);
         } else {
           drawIcon(type, x, y, radius * 0.75);
         }
@@ -483,21 +483,16 @@
 
       function drawHealIcon(cx, cy, size) {
         ctx.save();
-        ctx.fillStyle = '#065f46';
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 3;
+        const half = size * 0.6;
+        ctx.strokeRect(cx - half, cy - half, half * 2, half * 2);
         ctx.beginPath();
-        ctx.moveTo(cx, cy - size * 0.6);
-        ctx.arc(cx - size * 0.3, cy - size * 0.2, size * 0.3, Math.PI * 1.2, Math.PI * 2);
-        ctx.arc(cx + size * 0.3, cy - size * 0.2, size * 0.3, Math.PI, Math.PI * 1.8);
-        ctx.lineTo(cx, cy + size * 0.6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#4ade80';
-        ctx.beginPath();
-        ctx.rect(cx - size * 0.15, cy - size * 0.5, size * 0.3, size);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.rect(cx - size * 0.5, cy - size * 0.15, size, size * 0.3);
-        ctx.fill();
+        ctx.moveTo(cx - half * 0.8, cy);
+        ctx.lineTo(cx + half * 0.8, cy);
+        ctx.moveTo(cx, cy - half * 0.8);
+        ctx.lineTo(cx, cy + half * 0.8);
+        ctx.stroke();
         ctx.restore();
       }
 
