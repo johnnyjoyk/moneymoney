@@ -135,8 +135,8 @@
       // =========================
 
       const PLAYER_COLORS = [
-        { name: 'blue', label: '파랑', hex: '#60a5fa' },
-        { name: 'red', label: '빨강', hex: '#f87171' },
+        { name: 'blue', label: '파랑', hex: '#22d3ee' },
+        { name: 'red', label: '빨강', hex: '#ef4444' },
       ];
 
       const COLOR_RULES = {
@@ -150,20 +150,6 @@
         green: '#4ade80',
       };
 
-      function createSprite(src) {
-        const image = new Image();
-        const sprite = { image, loaded: false, failed: false };
-        image.addEventListener('load', () => (sprite.loaded = true));
-        image.addEventListener('error', () => (sprite.failed = true));
-        image.src = src;
-        return sprite;
-      }
-
-      const SPRITES = {
-        blue: createSprite('rps-blue.png'),
-        red: createSprite('rps-red.png'),
-        green: createSprite('rps-green.png'),
-      };
 
       const canvas = document.getElementById('game');
       const ctx = canvas.getContext('2d');
@@ -445,12 +431,6 @@
       }
 
       function drawColorToken(type, x, y, radius) {
-        const sprite = SPRITES[type];
-        if (sprite && sprite.loaded) {
-          ctx.drawImage(sprite.image, x - radius, y - radius, radius * 2, radius * 2);
-          return;
-        }
-
         ctx.beginPath();
         ctx.fillStyle = PIN_COLORS[type] || '#f8fafc';
         ctx.arc(x, y, radius, 0, Math.PI * 2);
